@@ -1,0 +1,5 @@
+../Core/Src/traffic.c:32:13:enter_phase	16	static
+../Core/Src/traffic.c:43:13:on_button_press	24	static
+../Core/Src/traffic.c:55:13:show	24	static
+../Core/Src/traffic.c:64:6:traffic_init	8	static
+../Core/Src/traffic.c:70:6:traffic_update	16	static
