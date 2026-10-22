@@ -1,23 +1,17 @@
 #include "gpio_drv.h"
 
-#define GPIO_PORT_STEP 0x400U /* расстояние между блоками регистров соседних портов */
-
-/* Разносит биты маски выводов по полям шириной width: бит n -> бит n*width.
- * Умножение результата на значение v < 2^width кладёт v в каждое выбранное
- * поле: поля не пересекаются, переносов в соседние нет. */
+/* Бит n -> бит n*width; умножение результата на v кладёт v в каждое выбранное поле */
 static uint32_t spread(uint16_t pins, unsigned width)
 {
 	uint32_t res = 0;
 
-	for (unsigned n = 0; n < 16 && n * width < 32; n++)
+	for (unsigned n = 0; n * width < 32; n++)
 		if (pins & (1U << n))
 			res |= 1U << (n * width);
 	return res;
 }
 
-/* Меняет поля регистра одной записью. Вариант reg &= ~mask; reg |= value
- * даёт две записи, и между ними поле на мгновение равно нулю - например,
- * MODER = 00 (вход), что на выходе выглядит как выброс. */
+/* Одной записью, без промежуточного состояния с обнулённым полем */
 static void write_fields(__IO uint32_t *reg, uint32_t mask, uint32_t value)
 {
 	*reg = (*reg & ~mask) | (value & mask);
@@ -25,64 +19,44 @@ static void write_fields(__IO uint32_t *reg, uint32_t mask, uint32_t value)
 
 static void clock_enable(GPIO_TypeDef *port)
 {
-	/* Порты идут подряд с шагом 0x400 начиная с GPIOA, биты GPIOxEN в AHB1ENR -
-	 * в том же порядке начиная с бита 0. */
-	uint32_t index = ((uintptr_t)port - GPIOA_BASE) / GPIO_PORT_STEP;
-
-	RCC->AHB1ENR |= 1U << index;
-	(void)RCC->AHB1ENR; /* после включения такта нужна пауза перед доступом к порту */
+	RCC->AHB1ENR |= 1U << (((uintptr_t)port - GPIOA_BASE) / 0x400U);
+	(void)RCC->AHB1ENR; /* пауза после включения такта */
 }
 
 static void set_level(GPIO_TypeDef *port, uint16_t pins, gpio_drv_level_t level)
 {
-	if (level == GPIO_DRV_LEVEL_HIGH)
-		port->BSRR = pins;
-	else if (level == GPIO_DRV_LEVEL_LOW)
-		port->BSRR = (uint32_t)pins << 16;
+	if (level != GPIO_DRV_LEVEL_KEEP)
+		gpio_drv_write(port, pins, level == GPIO_DRV_LEVEL_HIGH);
 }
 
 void gpio_drv_init(GPIO_TypeDef *port, uint16_t pins, const gpio_drv_config_t *cfg)
 {
-	uint32_t f2 = spread(pins, 2);  /* поля по 2 бита: MODER, OSPEEDR, PUPDR */
-	uint32_t af_lo = spread(pins & 0xFF, 4); /* поля по 4 бита: AFR[0] - выводы 0..7 */
-	uint32_t af_hi = spread(pins >> 8, 4);   /* AFR[1] - выводы 8..15 */
-	uint32_t otype = cfg->otype == GPIO_DRV_OTYPE_OPEN_DRAIN ? pins : 0;
+	uint32_t f2 = spread(pins, 2);
+	bool output = cfg->mode == GPIO_DRV_MODE_OUTPUT;
+	bool od = cfg->otype == GPIO_DRV_OTYPE_OPEN_DRAIN;
 
 	clock_enable(port);
 
-	/* Чтение-изменение-запись регистров не атомарна: на время настройки
-	 * запрещаем прерывания, сохраняя прежнее состояние флага. */
 	uint32_t primask = __get_PRIMASK();
 	__disable_irq();
 
-	if (cfg->mode == GPIO_DRV_MODE_OUTPUT || cfg->mode == GPIO_DRV_MODE_AF) {
-		/* Вывод будет управляемым. Порядок записей:
-		 * 1) тип выхода и уровень: для push-pull сначала уровень, для open-drain
-		 *    сначала тип - так уже работающий выход не выдаст активную "1",
-		 *    которой нет ни в старой, ни в новой настройке;
-		 * 2) скорость и номер альтернативной функции - пока вывод в старом режиме;
-		 * 3) MODER - вывод начинает выдавать уже готовое значение;
-		 * 4) подтяжка - уже после того, как вывод управляется, иначе вход
-		 *    успел бы переключиться на новую подтяжку. */
-		if (cfg->otype == GPIO_DRV_OTYPE_OPEN_DRAIN) {
-			write_fields(&port->OTYPER, pins, otype);
-			if (cfg->mode == GPIO_DRV_MODE_OUTPUT)
-				set_level(port, pins, cfg->level);
-		} else {
-			if (cfg->mode == GPIO_DRV_MODE_OUTPUT)
-				set_level(port, pins, cfg->level);
-			write_fields(&port->OTYPER, pins, otype);
-		}
+	/* Против выбросов: уровень до перевода в выход (для open-drain - после типа),
+	 * MODER после остальных полей, подтяжка - пока вывод управляется выходом */
+	if (output || cfg->mode == GPIO_DRV_MODE_AF) {
+		if (output && !od)
+			set_level(port, pins, cfg->level);
+		write_fields(&port->OTYPER, pins, od ? pins : 0);
+		if (output && od)
+			set_level(port, pins, cfg->level);
 		write_fields(&port->OSPEEDR, f2 * 3U, f2 * cfg->speed);
-		if (cfg->mode == GPIO_DRV_MODE_AF) {
-			write_fields(&port->AFR[0], af_lo * 0xFU, af_lo * cfg->af);
-			write_fields(&port->AFR[1], af_hi * 0xFU, af_hi * cfg->af);
+		if (!output) {
+			uint32_t lo = spread(pins & 0xFF, 4), hi = spread(pins >> 8, 4);
+			write_fields(&port->AFR[0], lo * 0xFU, lo * cfg->af);
+			write_fields(&port->AFR[1], hi * 0xFU, hi * cfg->af);
 		}
 		write_fields(&port->MODER, f2 * 3U, f2 * cfg->mode);
 		write_fields(&port->PUPDR, f2 * 3U, f2 * cfg->pull);
 	} else {
-		/* Вывод перестаёт управляться: новая подтяжка ставится, пока он ещё
-		 * выход (на выходе её не видно), затем MODER его отпускает. */
 		write_fields(&port->PUPDR, f2 * 3U, f2 * cfg->pull);
 		write_fields(&port->MODER, f2 * 3U, f2 * cfg->mode);
 	}
@@ -92,7 +66,7 @@ void gpio_drv_init(GPIO_TypeDef *port, uint16_t pins, const gpio_drv_config_t *c
 
 gpio_drv_config_t gpio_drv_get_config(GPIO_TypeDef *port, uint16_t pin)
 {
-	unsigned n = __builtin_ctz(pin); /* номер вывода по маске */
+	unsigned n = __builtin_ctz(pin);
 
 	return (gpio_drv_config_t) {
 		.mode  = (port->MODER >> (2 * n)) & 3U,
@@ -116,12 +90,11 @@ uint16_t gpio_drv_read_port(GPIO_TypeDef *port, uint16_t pins)
 
 void gpio_drv_write(GPIO_TypeDef *port, uint16_t pins, bool high)
 {
-	set_level(port, pins, high ? GPIO_DRV_LEVEL_HIGH : GPIO_DRV_LEVEL_LOW);
+	port->BSRR = high ? pins : (uint32_t)pins << 16;
 }
 
 void gpio_drv_write_port(GPIO_TypeDef *port, uint16_t pins, uint16_t values)
 {
-	/* Младшая половина BSRR устанавливает выводы в "1", старшая - сбрасывает в "0". */
 	port->BSRR = ((uint32_t)(pins & ~values) << 16) | (pins & values);
 }
 

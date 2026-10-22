@@ -4,7 +4,6 @@
 #include "stm32f4xx_hal.h"
 #include <stdbool.h>
 
-/* Фазы в порядке следования: после последней снова первая. */
 typedef enum {
 	PHASE_RED,
 	PHASE_GREEN,
@@ -15,19 +14,19 @@ typedef enum {
 
 #define RED_MS        12000
 #define RED_SHORT_MS  (RED_MS / 4)
-#define BLINK_HALF_MS 250 /* полпериода мигания зелёного */
+#define BLINK_HALF_MS 250
 
 static const uint32_t phase_ms[PHASE_COUNT] = {
 	[PHASE_RED]         = RED_MS,
-	[PHASE_GREEN]       = RED_MS / 4, /* по заданию: в 4 раза меньше красного */
+	[PHASE_GREEN]       = RED_MS / 4,
 	[PHASE_GREEN_BLINK] = 2000,
 	[PHASE_YELLOW]      = 1500,
 };
 
 static phase_t phase;
 static uint32_t phase_start;
-static uint32_t phase_len;   /* длительность текущей фазы, мс */
-static bool green_requested; /* кнопку нажали до красного — ближайший красный короткий */
+static uint32_t phase_len;
+static bool green_requested; /* ближайший красный будет коротким */
 
 static void enter_phase(phase_t next, uint32_t now)
 {
@@ -43,7 +42,7 @@ static void enter_phase(phase_t next, uint32_t now)
 static void on_button_press(uint32_t now)
 {
 	if (phase == PHASE_RED) {
-		/* Осталось больше 1/4 периода — сокращаем остаток до 1/4, иначе ничего. */
+		/* остаток красного сокращается до RED_SHORT_MS, если был больше */
 		uint32_t elapsed = now - phase_start;
 		if (elapsed + RED_SHORT_MS < phase_len)
 			phase_len = elapsed + RED_SHORT_MS;

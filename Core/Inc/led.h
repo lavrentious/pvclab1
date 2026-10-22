@@ -10,9 +10,8 @@ typedef enum {
 	LED_COUNT
 } led_id_t;
 
-void led_init(void); /* настроить выводы, все светодиоды погашены */
+void led_init(void);
 void led_set(led_id_t led, bool on);
 void led_toggle(led_id_t led);
-void led_all_off(void);
 
 #endif

@@ -1,10 +1,7 @@
 #include "led.h"
 #include "gpio_drv.h"
 
-/* Боковая панель SDK-1.1M: зелёный VD6 — PD13, двухцветный VD7 — PD14/PD15.
- * Все светодиоды горят при "1" на выходе. Красный и жёлтый — встречно-параллельные
- * кристаллы между PD14 и PD15: цвет горит, только если второй вывод в "0".
- * Если на стенде красный и жёлтый окажутся перепутаны — поменять местами строки ниже. */
+/* Красный и жёлтый - встречно-параллельные кристаллы VD7 между PD14 и PD15 */
 static const struct {
 	GPIO_TypeDef *port;
 	uint16_t pin;
@@ -18,10 +15,7 @@ void led_init(void)
 {
 	static const gpio_drv_config_t cfg = {
 		.mode  = GPIO_DRV_MODE_OUTPUT,
-		.otype = GPIO_DRV_OTYPE_PUSH_PULL,
-		.speed = GPIO_DRV_SPEED_LOW,
-		.pull  = GPIO_DRV_PULL_NONE,
-		.level = GPIO_DRV_LEVEL_LOW, /* уровень задаётся до перевода в выход — все погашены */
+		.level = GPIO_DRV_LEVEL_LOW,
 	};
 
 	for (int i = 0; i < LED_COUNT; i++)
@@ -36,10 +30,4 @@ void led_set(led_id_t led, bool on)
 void led_toggle(led_id_t led)
 {
 	gpio_drv_toggle(leds[led].port, leds[led].pin);
-}
-
-void led_all_off(void)
-{
-	for (int i = 0; i < LED_COUNT; i++)
-		led_set(i, false);
 }
