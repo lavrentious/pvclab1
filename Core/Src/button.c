@@ -1,11 +1,12 @@
 #include "button.h"
+#include "gpio_drv.h"
 #include "main.h"
 #include <stdbool.h>
 
 /* Кнопка SB1 на PC15: внешняя подтяжка R11 к +3.3V, нажатие замыкает на землю,
- * т.е. нажата = «0». */
+ * т.е. нажата = "0". */
 #define BUTTON_PORT GPIOC
-#define BUTTON_PIN  GPIO_PIN_15
+#define BUTTON_PIN  GPIO_DRV_PIN(15)
 
 #define DEBOUNCE_MS   20  /* сколько сырой сигнал должен быть стабилен */
 #define LONG_PRESS_MS 500 /* граница между коротким и длинным нажатием */
@@ -17,7 +18,17 @@ static uint32_t pressed_at;
 
 static bool read_raw(void)
 {
-	return HAL_GPIO_ReadPin(BUTTON_PORT, BUTTON_PIN) == GPIO_PIN_RESET;
+	return !gpio_drv_read(BUTTON_PORT, BUTTON_PIN);
+}
+
+void button_init(void)
+{
+	static const gpio_drv_config_t cfg = {
+		.mode = GPIO_DRV_MODE_INPUT,
+		.pull = GPIO_DRV_PULL_NONE, /* подтяжка внешняя */
+	};
+
+	gpio_drv_init(BUTTON_PORT, BUTTON_PIN, &cfg);
 }
 
 button_event_t button_poll(void)

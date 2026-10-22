@@ -8,6 +8,9 @@ typedef enum {
 	BUTTON_EVENT_RELEASE_LONG,  /* отпустили, нажатие было длинным */
 } button_event_t;
 
+/* Настроить вывод кнопки. Вызвать один раз до button_poll(). */
+void button_init(void);
+
 /* Вызывать как можно чаще из главного цикла. Не блокирует.
  * Возвращает не более одного события за вызов. */
 button_event_t button_poll(void);

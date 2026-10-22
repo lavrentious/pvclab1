@@ -22,6 +22,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "led.h"
+#include "button.h"
 #include "traffic.h"
 
 /* USER CODE END Includes */
@@ -86,6 +88,8 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   /* USER CODE BEGIN 2 */
+  led_init();
+  button_init();
   traffic_init();
 
   /* USER CODE END 2 */
